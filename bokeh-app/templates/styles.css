@@ -1,0 +1,43 @@
+html {
+    width: 100%;
+}
+body {
+    min-width: 600px;
+    max-width: 900px;
+    width: 80%;
+    margin: auto;
+	color: #FFFFFF;
+	background-color: #000000;
+}
+.content {
+    margin: 2em;
+}
+h1 {
+    margin: 2em 0 0 0;
+    color: #FFFFFF;
+    font-family: 'Julius Sans One', sans-serif;
+    font-size: 1.8em;
+	background: #000000;
+}
+a:link {
+    font-weight: bold;
+    text-decoration: none;
+    color: #00b9f6;
+}
+a:visited {
+    font-weight: bold;
+    text-decoration: none;
+    color: #b8f7ff;
+}
+a:hover, a:focus, a:active {
+    text-decoration: underline;
+    color: #ff0072;
+}
+p {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 1.0em;
+	color: #FFFFFF;
+    text-align: justify;
+    text-justify: inter-word;
+	background: #000000;
+}

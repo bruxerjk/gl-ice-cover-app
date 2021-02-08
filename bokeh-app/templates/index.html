@@ -1,0 +1,26 @@
+{% extends base %}
+
+{% block title %}Bokeh Gapminder Example{% endblock %}
+
+{% block postamble %}
+  <style>
+    {% include 'styles.css' %}
+  </style>
+{% endblock %}
+
+{% block contents %}
+  <div class="content">
+    <h1>Great Lakes Ice Cover Concentration</h1>
+
+    <p>Data from the <a href="https://www.glerl.noaa.gov/data/ice/">NOAA Great Lakes Environmental 
+	Research Laboratory</a> showing historical (1973-present) ice cover concentration for each of 
+	the Great Lakes.<br>
+	<br>
+	Each line represents data from one complete winter season.  Move sliders to highlight specific years. </p>
+
+    {{ super() }}
+
+    <p>Graphic: Jacob Bruxer</p>
+
+  </div>
+{% endblock %}

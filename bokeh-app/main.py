@@ -1,3 +1,12 @@
+"""
+Bokeh application produces interactive plots of GLERL's historical Great Lakes
+ice cover concentration data
+
+Data source: https://www.glerl.noaa.gov/data/ice/
+
+@author: Jacob Bruxer
+"""
+
 import pandas as pd
 from datetime import datetime, timedelta
 from bokeh.io import curdoc, show
@@ -8,59 +17,177 @@ from bokeh.models import FixedTicker, Range1d, HoverTool, Label, Div, Slider
 from bokeh.layouts import layout
 from math import pi
 
+# Application is designed to be launched as a full Bokeh server application
+# which will use an html template and css style sheet to display some custom
+# formatting; However, if standalone application is desired, setting FULL_APP
+# to False will produce an HTML outfile with some simplified formatting
 
-PLOT_WIDTH = 330
+FULL_APP = True  # set to False for standalone HTML app
+
+PLOT_WIDTH = 360
 PLOT_HEIGHT = int(PLOT_WIDTH * 0.7)
 
-SELECTED_COLOUR = 'blue'
+SELECTED_COLOUR_1 = '#14e5ff'
+SELECTED_COLOUR_2 = '#ff61a8'
 
-def get_data(lake):
+JULIAN_FIRST_DAY = 304
 
-    url = f'''https://www.glerl.noaa.gov/data/ice/daily/{lake}.txt'''
-    hist_df = pd.read_csv(url, sep='\s+', index_col=[0])
-    hist_df.drop('Feb-29', inplace=True)
-    hist_df.reset_index(inplace=True)
+def get_current_yr_data(current_yr):
+    """
+    Fetches daily average ice concentration data for all Great Lakes
 
-    julian_first_day = 304 # Nov 1
+    Parameters
+    ----------
+    current_yr : int
+        The current year to fetch the data.
 
-    first_date = hist_df['index'].iloc[0]
-    first_date = datetime.strptime(first_date, '%b-%d')
-    julian = int(first_date.strftime('%j'))
+    Returns
+    -------
+    current_df : pandas dataframe
+        Current year's data, stored as day, value_lake1, value_lake2, ...
 
-    hist_df.drop('index', axis=1, inplace=True)
-    offset = julian-julian_first_day
+        Columns include:
+        'sup', 'mic', 'hur', 'eri', 'ont', 'bas' (ie, full Great Lakes basin).
 
-    days = list(range(offset, offset+len(hist_df)))
-    hist_df['day'] = days
-    hist_df.set_index('day', inplace=True)
 
-    last_yr = int(hist_df.columns[-1])
-    cur_yr = last_yr+1
-    url = f'https://coastwatch.glerl.noaa.gov/statistic/ice/dat/g{last_yr}_{cur_yr}_ice.dat'
+    """
+    # fetch and read current year's data
+    last_yr = current_yr - 1
 
+    url = f'https://coastwatch.glerl.noaa.gov/statistic/ice/dat/g{last_yr}_{current_yr}_ice.dat'
+
+    # convert names to same as historical data
     names=['year','day','sup','mic','hur','eri','ont','stc','bas']
     current_df = pd.read_csv(url, sep='\s+', skiprows=7, header=0, names=names)
 
+    # for the current year's data, the dates are already in julian days
     julian = current_df['day'].iloc[0]
-    offset = julian-julian_first_day
+
+    # for plotting purposes, we set Nov 1 to day 1
+    offset = julian-JULIAN_FIRST_DAY
     days = list(range(offset, offset+len(current_df)))
     current_df['day'] = days
     current_df.set_index('day', inplace=True)
 
+    return current_df
+
+
+def get_historical_data(lake):
+    """
+    Fetches historical daily average ice cover concentration data for one lake
+
+    Parameters
+    ----------
+    lake : string
+
+        Name of lake data to fetch.  Options are:
+
+        'sup', 'mic', 'hur', 'eri', 'ont', 'bas' (ie, full Great Lakes basin).
+
+    Returns
+    -------
+    df : pandas dataframe
+
+        Tabular time series of ice concentration data (% cover) with
+        dates as index and years as columns. Example of formatting:
+
+        day | 1973 | 1974 | ... | last year
+        ----------------------------------
+        1   |  0.0 |  0.0 | ... |    0.0
+        2   |  1.2 |  0.0 | --- |    0.0
+        3   |  2.5 |  0.8 | --- |    0.2
+        ...
+        220 |  0.0 |  0.0 | --- |    0.0
+
+    """
+
+    # fetch and read historical data through last year
+    url = f'''https://www.glerl.noaa.gov/data/ice/daily/{lake}.txt'''
+
+    # index is the date column to start
+    hist_df = pd.read_csv(url, sep='\s+', index_col=[0])
+
+    # for simplicity, drop Feb 29 (could miss max, so fix this)
+    hist_df.drop('Feb-29', inplace=True)
+
+    # convert string dates to julian days for plotting
+    hist_df.reset_index(inplace=True)
+
+    first_date = hist_df['index'].iloc[0]  # first date in table
+    first_date = datetime.strptime(first_date, '%b-%d')
+    julian = int(first_date.strftime('%j'))
+
+    # drop date index
+    hist_df.drop('index', axis=1, inplace=True)
+
+    # for plotting purposes, we'll set Nov 1 to day 1
+    offset = julian-JULIAN_FIRST_DAY
+    days = list(range(offset, offset+len(hist_df)))
+    hist_df['day'] = days
+    hist_df.set_index('day', inplace=True)
+
+    return hist_df
+
+def combine_data(lake, current_yr, current_df, hist_df):
+    """
+    Combine historical & current year's data into a single, complete dataframe
+
+    Parameters
+    ----------
+    lake : string
+        Name of lake data to fetch.  Options are:
+
+        'sup', 'mic', 'hur', 'eri', 'ont', 'bas' (ie, full Great Lakes basin).
+
+    current_yr : int
+        Current year, only necessary to rename column.
+    current_df : pandas dataframe
+        Current year's data, stored as day, value series.
+    hist_df : pandas dataframe
+        Historical data, stored as table of day, value_yr1, value_yr2, ...
+
+    Returns
+    -------
+    df : pandas dataframe
+        Combined dataset.
+        Stored as table of day, value_yr1, value_yr2... value_current_yr
+
+    """
+
+    # create full, clean empty dataframe
     df = pd.DataFrame(index=list(range(1,221))) # Nov 1 to Jun 10
+
+    # concat with historical df
     df = pd.concat([df, hist_df], axis=1)
 
+    # concat with current df
     df = pd.concat([df, current_df[lake]], axis=1)
 
-    df.rename({lake : str(cur_yr)}, axis=1, inplace=True)
+    # rename column from current dataframe to current year
+    df.rename({lake : str(current_yr)}, axis=1, inplace=True)
 
+    # give index a name
     df.index.rename('day', inplace=True)
 
-    return {'url': url, 'data': df}
-
+    return df
 
 def create_baseplot(lake):
-    '''create base spaghetti plot'''
+    """
+    Create base Bokeh plot
+
+    Parameters
+    ----------
+    lake : string
+        Name of lake data to fetch.  Options are:
+
+        'sup', 'mic', 'hur', 'eri', 'ont', 'bas' (ie, full Great Lakes basin).
+
+    Returns
+    -------
+    fig : bokeh figure
+        Empty Bokeh plot with minimal fomatting
+
+    """
 
     plot_width = PLOT_WIDTH
     plot_height = PLOT_HEIGHT
@@ -94,6 +221,10 @@ def create_baseplot(lake):
     tick_labels = dict(zip(ticks, labels))
     fig.xaxis.major_label_overrides = tick_labels
 
+    # Balances grid since it ends after June 1
+    fig.x_range.start = -5
+
+    fig.grid.grid_line_dash = [5,2]
 
     fig.toolbar.logo = None
 
@@ -101,17 +232,41 @@ def create_baseplot(lake):
 
 
 def plot_all(fig, df, start_year, end_year):
+    """
+    Add all years as lines to the Bokeh figure
 
+    Parameters
+    ----------
+    fig : Bokeh figure
+        Empty bokeh figure.
+    df : pandas dataframe
+        Tabular dataframe of ice data.
+    start_year : int
+        Starting year to plot.
+    end_year : int
+        Ending year to plot.
 
+    Returns
+    -------
+    fig : Bokeh figure
+        Same bokeh figure but now including all years plotted as lines.
+    lines : list of bokeh line glyphs
+        Plotted lines are assigned as variables and stored in list for
+        use in legend later.
+
+    """
     lines = list() # empty list to hold each plotted line
 
+    # ensures ColumnDataSource will work
     df.columns = df.columns.astype(str)
+    source = ColumnDataSource(df)
 
-    source = ColumnDataSource(df.fillna(0))
+    # generate grey palette the size of dataset
+    # but use offset at each end to avoid using some of the darkest and
+    # lightest values
+    offset = 10
+    palette = palettes.grey(end_year - start_year + 1 + offset*4)
 
-    offset = 5
-    # generate palette the size of dataset but offset each end
-    palette = palettes.grey(end_year - start_year + 1 + offset*2)
     unselected_kwargs = dict(line_width = 1.5,
                              line_alpha = 0.5)
 
@@ -130,21 +285,62 @@ def plot_all(fig, df, start_year, end_year):
 
 
 def get_tooltips(year):
+    """
+    Generate a simple tool tip
+
+    Parameters
+    ----------
+    year : int
+        Year for tooltip.
+
+    Returns
+    -------
+    tooltips : bokeh tooltip
+        Formatted tooltip for use in bokeh figure.
+
+    """
+
+    try:
+        year = str(year)
+    except:
+        pass
 
     tooltips = [('Date', '-'.join((year,'@date'))),
-                ('Value', '$y{0.0}%')]
+                ('Value', '@{}{}%'.format(year,'{0.0}'))]
 
     return tooltips
 
 
-def plot_selected(fig, df, year):
+def plot_selected(fig, df, year, selected_colour):
+    """
+    Add a highlighted line for a selected year to the Bokeh figure
 
-    # add highlighted line function
-    # uses custom javascript callback
-    # based on https://stackoverflow.com/a/42321618/2574074
+    Parameters
+    ----------
+    fig : Bokeh figure
+        Empty bokeh figure.
+    df : pandas dataframe
+        Tabular dataframe of ice data.
+    year : int
+        Selected year to add highlighted line to plot.
+    selected_colour : string
+        Colour to use for plotting selected line.
 
-    selected_color = SELECTED_COLOUR
-    selected_kwargs = dict(line_color = selected_color,
+    Returns
+    -------
+    fig : Bokeh figure
+        Same bokeh figure but now including selected year plotted as
+        highlighted line.
+    selected : bokeh line glyph
+        Plotted line is assigned as variable for use in legend later.
+    hover : bokeh hover tool
+        Hover tool with tooltip for selected line.
+    label : bokeh label
+        Label with year text.
+
+    """
+
+    selected_kwargs = dict(line_color = selected_colour,
                            line_width = 4)
 
     source = ColumnDataSource(df)
@@ -159,10 +355,10 @@ def plot_selected(fig, df, year):
     tooltips = get_tooltips(y)
 
     hover = fig.add_tools(HoverTool(tooltips=tooltips,
-                         toggleable = False,
-                         names=[y],
-                         mode='vline'
-                         ))
+                          toggleable = False,
+                          names=[y],
+                          mode='mouse'
+                          ))
 
     # find location of peak value for labelling
     labelx = df[str(year)].idxmax(axis=0) # index of max ice
@@ -171,26 +367,46 @@ def plot_selected(fig, df, year):
     # add label for selected year, locate at peak
     label = Label(x=labelx, y=labely, x_units='data',
                         text=f'{year}', render_mode='css',
-                        text_color=selected_color, text_baseline='bottom',
+                        text_color=selected_colour,
+                        text_baseline='bottom',
                         text_font_style = 'bold')
 
     fig.add_layout(label)
 
-    return fig, selected, hover, label
+    return fig, selected, label, hover
 
 
 def build_layout():
 
-    lakes = {'Great Lakes' : get_data('bas'),
-             'Lake Superior': get_data('sup'),
-             'Lake Michigan': get_data('mic'),
-             'Lake Huron': get_data('hur'),
-             'Lake Erie': get_data('eri'),
-             'Lake Ontario': get_data('ont')}
+    #
+    current_year = datetime.now().year
+
+    if datetime.now().month >= 10:
+        current_year += 1
+
+    # get current year's data for all of the Great Lakes
+    current_df = get_current_yr_data(current_year)
+
+    # get historical data for each lake individually then combine with current year
+    lakes = {'Great Lakes' : {'data' : combine_data('bas', current_year, current_df,
+                                                     get_historical_data('bas'))},
+             'Lake Superior': {'data' : combine_data('sup', current_year, current_df,
+                                                     get_historical_data('sup'))},
+             'Lake Michigan': {'data' : combine_data('mic', current_year, current_df,
+                                                     get_historical_data('mic'))},
+             'Lake Huron': {'data' : combine_data('hur', current_year, current_df,
+                                                     get_historical_data('hur'))},
+             'Lake Erie': {'data' : combine_data('eri', current_year, current_df,
+                                                     get_historical_data('eri'))},
+             'Lake Ontario': {'data' : combine_data('ont', current_year, current_df,
+                                                     get_historical_data('ont'))}}
+
 
     for lake in lakes.keys():
 
+        # create an empty plot
         fig = create_baseplot(lake)
+
         df = lakes[lake]['data']
 
         start_year = int(df.columns[0])
@@ -203,67 +419,126 @@ def build_layout():
 
         fig, lines = plot_all(fig, df, start_year, end_year)
 
-        fig, selected, hover, label = plot_selected(fig, df, end_year)
+        fig, selected_2, label_2, hover_2 = plot_selected(fig, df, end_year-1, SELECTED_COLOUR_2)
+        fig, selected_1, label_1, hover_1 = plot_selected(fig, df, end_year, SELECTED_COLOUR_1)
+
+        # Copied from below, could likely get this to be one calleable function
+        # this should generally ensure that labels are not overlapping
+        ybuffer = 10
+        xbuffer = 30
+
+        # label positioning check
+        # first, check if vertical is overlapping
+        if (label_1.y - ybuffer) < label_2.y < (label_1.y + ybuffer):
+
+            # if so, check if horizontal is also overlapping
+            #if (labely_1 - xbuffer) < labely_2 < (labely_1 + xbuffer):
+            if (label_1.x - xbuffer) < label_2.x < (label_1.x + xbuffer):
+
+                # shift x position of label_2 further right
+                label_2.x = label_2.x + xbuffer
+                # find y value at new x location of label_2
+                label_2.y = lakes[lake]['data'].loc[label_2.x, str(end_year-1)]
 
         lakes[lake]['plot'] = {'fig':fig,
                                'lines':lines,
-                               'selected':selected,
-                               'label':label}
+                               'selected_1':selected_1,
+                               'selected_2': selected_2,
+                               'label_1': label_1,
+                               'label_2' : label_2}
 
-    curdoc().theme = 'light_minimal'
-
-    credits_text_1 = '''Data: NOAA Great Lakes Environmental Research Laboratory'''
-    credits_text_2 = '''Graphic: Jacob Bruxer'''
-
-    title = 'Great Lakes Ice Cover Concentration (1973-{})'.format(end_year)
-
-    subtitle = '<br>' + credits_text_1.format(end_year) + \
-               '<br>URL : https://www.glerl.noaa.gov/data/ice/#historical' + \
-               '<br><br>' + credits_text_2
+    curdoc().theme = 'dark_minimal'
 
     width = PLOT_WIDTH
-    #height = 50
 
-    title= Div(text=title.format(end_year),
-           style={'font-size': '150%', 'color': 'black'},
-           width=width)
-
-    subtitle=Div(text=subtitle,
-             style={'font-size': '70%', 'color': 'black'},
-             width=width)
-
-    slider = Slider(start=start_year,
+    # add sliders
+    slider_1 = Slider(start=start_year,
                     end=end_year,
                     value=end_year,
                     step=1,
-                    title='Select Year',
+                    title='Selected Year',
                     width=width-30,
-                    bar_color=SELECTED_COLOUR,
+                    bar_color=SELECTED_COLOUR_1,
                     orientation='horizontal')
 
-    # add slider with callback
+    slider_2 = Slider(start=start_year,
+                    end=end_year-1,
+                    value=end_year-1,
+                    step=1,
+                    title='Selected Year',
+                    width=width-30,
+                    bar_color=SELECTED_COLOUR_2,
+                    orientation='horizontal')
+
+    # callback to use for both sliders
     def callback(atrr, old, new):
+        """
+        This callback is used for both sliders, called whenever either slider
+        is adjusted.  This means the entire function is called each time, so
+        even if only one slider is changed, the function calls related to the
+        other slider are re-run as well, which could likely be modified /
+        improved; however, the benefit is that I can reassess and reposition
+        over-lapping labels
 
-
+        """
         for lake in lakes.keys():
             p = lakes[lake]['plot']
-            p['selected'].glyph.name=str(slider.value)
-            p['selected'].glyph.y=str(slider.value)
-            y = str(slider.value)
-            p['fig'].tools[0].tooltips = get_tooltips(y)
-            p['fig'].tools[0].names = [y]
+
+            p['selected_1'].glyph.name=str(slider_1.value)
+            p['selected_1'].glyph.y=str(slider_1.value)
+            y_1 = str(slider_1.value)
+            p['fig'].tools[0].tooltips = get_tooltips(y_1)
+            p['fig'].tools[0].names = [y_1]
 
             # find location of peak value for labelling
-            labelx = lakes[lake]['data'][y].idxmax(axis=0) # index of max ice cover
-            labely = lakes[lake]['data'].loc[:, y].max() # max ice cover
+            labelx_1 = lakes[lake]['data'][y_1].idxmax(axis=0) # index of max ice cover
+            labely_1 = lakes[lake]['data'].loc[:, y_1].max() # max ice cover
 
             # add label for selected year, locate at peak
-            lakes[lake]['plot']['label'].x=labelx
-            lakes[lake]['plot']['label'].y=labely
-            lakes[lake]['plot']['label'].text=y
-            lakes[lake]['plot']['label'].text_font_style = 'bold'
+            lakes[lake]['plot']['label_1'].x=labelx_1
+            lakes[lake]['plot']['label_1'].y=labely_1
+            lakes[lake]['plot']['label_1'].text=y_1
+            lakes[lake]['plot']['label_1'].text_font_style = 'bold'
 
-    slider.on_change('value', callback)
+            # selected 2
+            p['selected_2'].glyph.name=str(slider_2.value)
+            p['selected_2'].glyph.y=str(slider_2.value)
+            y_2 = str(slider_2.value)
+            p['fig'].tools[0].tooltips = get_tooltips(y_2)
+            p['fig'].tools[0].names = [y_2]
+
+            # find location of peak value for labelling
+            labelx_2 = lakes[lake]['data'][y_2].idxmax(axis=0) # index of max ice cover
+            labely_2 = lakes[lake]['data'].loc[:, y_2].max() # max ice cover
+
+            # this should generally ensure that labels are not overlapping
+            ybuffer = 10
+            xbuffer = 30
+
+            # label positioning check
+            # first, check if vertical is overlapping
+            if (labely_1 - ybuffer) < labely_2 < (labely_1 + ybuffer):
+
+                # if so, check if horizontal is also overlapping
+                #if (labely_1 - xbuffer) < labely_2 < (labely_1 + xbuffer):
+                if (labelx_1 - xbuffer) < labelx_2 < (labelx_1 + xbuffer):
+
+                    # shift x position of label_2 further right
+                    labelx_2 = labelx_2 + xbuffer
+                    # find y value at new x location of label_2
+                    labely_2 = lakes[lake]['data'].loc[labelx_2, y_2]
+
+            # add label for selected year, locate at peak
+            lakes[lake]['plot']['label_2'].x=labelx_2
+            lakes[lake]['plot']['label_2'].y=labely_2
+            lakes[lake]['plot']['label_2'].text=y_2
+            lakes[lake]['plot']['label_2'].text_font_style = 'bold'
+
+    # value_throttled prevents callback until slider is released, prevents lag
+    slider_1.on_change('value_throttled', callback)
+
+    slider_2.on_change('value_throttled', callback)
+
 
     plots = [None]*6
     plots[0] = lakes['Lake Superior']['plot']['fig']
@@ -273,21 +548,58 @@ def build_layout():
     plots[4] = lakes['Lake Ontario']['plot']['fig']
     plots[5] = lakes['Great Lakes']['plot']['fig']
 
-    app_layout = layout([title], [subtitle, slider],
-                        [plots[0], plots[1], plots[2]],
-                        [plots[3], plots[4], plots[5]])
 
     for lake in [1,2,4,5]:
         plots[lake].yaxis.axis_label = None
         plots[lake].plot_width = PLOT_WIDTH - 25
 
+    curdoc().title = "Great Lakes Ice Coverage"
+
+    if FULL_APP is False:
+
+        # if not a full bokeh app, create standalone version with a title and
+        # some additional descriptive text/credit info
+        title = 'Great Lakes Ice Cover Concentration (1973-{})'.format(end_year)
+
+        credits_text_1 = '''Data: NOAA Great Lakes Environmental Research Laboratory'''
+        credits_text_2 = '''Graphic: Jacob Bruxer'''
+
+        subtitle = '<br>' + credits_text_1.format(end_year) + \
+                   '<br>URL : https://www.glerl.noaa.gov/data/ice/#historical' + \
+                   '<br><br>' + credits_text_2
+
+        text_colour = ("#FFFFFF" if FULL_APP is True else 'black')
+
+
+        title= Div(text=title.format(end_year),
+               style={'font-size': '150%', 'color': text_colour},
+               width=width)
+
+        subtitle=Div(text=subtitle,
+                 style={'font-size': '70%', 'color': text_colour},
+                 width=width)
+
+        app_layout = layout([title, slider_1], [subtitle, slider_2],
+                            [plots[0], plots[1], plots[2]],
+                            [plots[3], plots[4], plots[5]])
+
+        from bokeh.io import output_file
+
+        output_file("out.html")
+        show(app_layout)
+
+    else:
+
+        # lay out components in rows/columns
+        app_layout = layout([slider_1], [slider_2],
+                            [plots[0], plots[1], plots[2]],
+                            [plots[3], plots[4], plots[5]])
+
+        curdoc().add_root(app_layout)
+
     return app_layout
 
 app_layout = build_layout()
-curdoc().add_root(app_layout)
-curdoc().title = "Great Lakes Ice Coverage"
 
-from bokeh.io import output_file
 
-output_file("out.html")
-show(app_layout)
+
