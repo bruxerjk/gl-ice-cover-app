@@ -22,7 +22,7 @@ from math import pi
 # formatting; However, if standalone application is desired, setting FULL_APP
 # to False will produce an HTML outfile with some simplified formatting
 
-FULL_APP = False  # set to False for standalone HTML app
+FULL_APP = True  # set to False for standalone HTML app
 
 PLOT_WIDTH = 350 if FULL_APP is True else 600
 PLOT_HEIGHT = int(PLOT_WIDTH * 0.7)
