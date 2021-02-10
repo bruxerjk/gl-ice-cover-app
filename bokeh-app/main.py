@@ -14,7 +14,7 @@ from bokeh.models.sources import ColumnDataSource
 from bokeh import palettes
 from bokeh.plotting import figure
 from bokeh.models import FixedTicker, Range1d, HoverTool, Label, Div, Slider
-from bokeh.layouts import layout
+from bokeh.layouts import layout, grid, gridplot, column, row
 from math import pi
 
 # Application is designed to be launched as a full Bokeh server application
@@ -22,15 +22,16 @@ from math import pi
 # formatting; However, if standalone application is desired, setting FULL_APP
 # to False will produce an HTML outfile with some simplified formatting
 
-FULL_APP = True  # set to False for standalone HTML app
+FULL_APP = False  # set to False for standalone HTML app
 
-PLOT_WIDTH = 360
+PLOT_WIDTH = 350 if FULL_APP is True else 600
 PLOT_HEIGHT = int(PLOT_WIDTH * 0.7)
 
 SELECTED_COLOUR_1 = '#14e5ff'
 SELECTED_COLOUR_2 = '#ff61a8'
 
-JULIAN_FIRST_DAY = 304
+# Season defined as starting on November 1, season_days as integers follow
+SEASON_DAYS_1 = int(datetime(1900,11,1).strftime('%j'))
 
 def get_current_yr_data(current_yr):
     """
@@ -63,11 +64,11 @@ def get_current_yr_data(current_yr):
     # for the current year's data, the dates are already in julian days
     julian = current_df['day'].iloc[0]
 
-    # for plotting purposes, we set Nov 1 to day 1
-    offset = julian-JULIAN_FIRST_DAY
+    # for plotting purposes, we set Nov 1 to season_day 1
+    offset = julian-SEASON_DAYS_1
     days = list(range(offset, offset+len(current_df)))
-    current_df['day'] = days
-    current_df.set_index('day', inplace=True)
+    current_df['season_day'] = days
+    current_df.set_index('season_day', inplace=True)
 
     return current_df
 
@@ -89,15 +90,17 @@ def get_historical_data(lake):
     df : pandas dataframe
 
         Tabular time series of ice concentration data (% cover) with
-        dates as index and years as columns. Example of formatting:
+        season_days (starting Nov 1) as index and years as columns.
 
-        day | 1973 | 1974 | ... | last year
+        Example of formatting:
+
+        season_day | 1973 | 1974 | ... | last year
         ----------------------------------
-        1   |  0.0 |  0.0 | ... |    0.0
-        2   |  1.2 |  0.0 | --- |    0.0
-        3   |  2.5 |  0.8 | --- |    0.2
-        ...
-        220 |  0.0 |  0.0 | --- |    0.0
+            1      |  0.0 |  0.0 | ... |    0.0
+            2      |  1.2 |  0.0 | --- |    0.0
+            3      |  2.5 |  0.8 | --- |    0.2
+           ...
+           220     |  0.0 |  0.0 | --- |    0.0
 
     """
 
@@ -107,8 +110,17 @@ def get_historical_data(lake):
     # index is the date column to start
     hist_df = pd.read_csv(url, sep='\s+', index_col=[0])
 
-    # for simplicity, drop Feb 29 (could miss max, so fix this)
-    hist_df.drop('Feb-29', inplace=True)
+    # this will drop the NaN for Feb-29 in non-leap years
+    top = hist_df.loc[:"Feb-28"]  # split all data up to Feb-28
+    bottom = hist_df.loc["Feb-29":]  # split remainder of data
+
+    # will sort all Nan to bottom and retain order of real values
+    # unlikely for this case, but an issue here in that if there are other NaN
+    # values within the data they will also be pushed to bottom
+    bottom = bottom.apply(lambda x: sorted(x, key=pd.isnull), axis=0)
+
+    # re-combine top and bottom
+    hist_df = pd.concat([top, bottom], sort=False)
 
     # convert string dates to julian days for plotting
     hist_df.reset_index(inplace=True)
@@ -120,13 +132,14 @@ def get_historical_data(lake):
     # drop date index
     hist_df.drop('index', axis=1, inplace=True)
 
-    # for plotting purposes, we'll set Nov 1 to day 1
-    offset = julian-JULIAN_FIRST_DAY
+    # for plotting purposes, we'll set Nov 1 to season_day 1
+    offset = julian-SEASON_DAYS_1
     days = list(range(offset, offset+len(hist_df)))
-    hist_df['day'] = days
-    hist_df.set_index('day', inplace=True)
+    hist_df['season_day'] = days
+    hist_df.set_index('season_day', inplace=True)
 
     return hist_df
+
 
 def combine_data(lake, current_yr, current_df, hist_df):
     """
@@ -167,9 +180,10 @@ def combine_data(lake, current_yr, current_df, hist_df):
     df.rename({lake : str(current_yr)}, axis=1, inplace=True)
 
     # give index a name
-    df.index.rename('day', inplace=True)
+    df.index.rename('season_day', inplace=True)
 
     return df
+
 
 def create_baseplot(lake):
     """
@@ -273,7 +287,7 @@ def plot_all(fig, df, start_year, end_year):
     # plot all years
     for i, yr in enumerate(range(start_year, end_year+1)):
 
-        lines.append(fig.line(x='day',
+        lines.append(fig.line(x='season_day',
                               y=str(yr),
                               source=source,
                               color=palette[i+offset],
@@ -346,7 +360,7 @@ def plot_selected(fig, df, year, selected_colour):
     source = ColumnDataSource(df)
 
     y=str(year)
-    selected = fig.line(x='day',
+    selected = fig.line(x='season_day',
                           y=y,
                           source=source,
                           name=y,
@@ -386,6 +400,15 @@ def build_layout():
 
     # get current year's data for all of the Great Lakes
     current_df = get_current_yr_data(current_year)
+
+    last_data_yr = current_df['year'].iloc[-1]
+    last_data_day_of_yr = current_df['day'].iloc[-1]
+    try:
+        last_data_yr = int(last_data_yr)
+        last_data_day_of_yr = int(last_data_day_of_yr)
+    except:
+        pass
+    last_data_updated = datetime(last_data_yr,1,1)+timedelta(days=last_data_day_of_yr-1)
 
     # get historical data for each lake individually then combine with current year
     lakes = {'Great Lakes' : {'data' : combine_data('bas', current_year, current_df,
@@ -555,6 +578,9 @@ def build_layout():
 
     curdoc().title = "Great Lakes Ice Coverage"
 
+    text_colour = ("#FFFFFF" if FULL_APP is True else 'black')
+    updated="""(Data updated through {} UTC)""".format(last_data_updated.strftime('%Y-%m-%d'))
+
     if FULL_APP is False:
 
         # if not a full bokeh app, create standalone version with a title and
@@ -565,10 +591,9 @@ def build_layout():
         credits_text_2 = '''Graphic: Jacob Bruxer'''
 
         subtitle = '<br>' + credits_text_1.format(end_year) + \
-                   '<br>URL : https://www.glerl.noaa.gov/data/ice/#historical' + \
-                   '<br><br>' + credits_text_2
-
-        text_colour = ("#FFFFFF" if FULL_APP is True else 'black')
+                   '<br>URL : https://www.glerl.noaa.gov/data/ice/' + \
+                   '<br><br>' + credits_text_2 + \
+                   '<br><br>' + updated
 
 
         title= Div(text=title.format(end_year),
@@ -579,9 +604,10 @@ def build_layout():
                  style={'font-size': '70%', 'color': text_colour},
                  width=width)
 
-        app_layout = layout([title, slider_1], [subtitle, slider_2],
+        app_layout = layout([[title],
+                            [subtitle, column(slider_1, slider_2)],
                             [plots[0], plots[1], plots[2]],
-                            [plots[3], plots[4], plots[5]])
+                            [plots[3], plots[4], plots[5]]])
 
         from bokeh.io import output_file
 
@@ -590,8 +616,11 @@ def build_layout():
 
     else:
 
+        updated = Div(text=updated)
+
         # lay out components in rows/columns
-        app_layout = layout([slider_1], [slider_2],
+        app_layout = layout([slider_1],
+                            [slider_2], [updated],
                             [plots[0], plots[1], plots[2]],
                             [plots[3], plots[4], plots[5]])
 
