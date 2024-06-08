@@ -2,6 +2,14 @@
 
 This is a Bokeh application to view Great Lakes daily ice cover concentration from NOAA's Great Lakes Environmental Research Laboratory.
 
+## Instructions
+Run app from command line using:
+    
+    bokeh serve --show main.py
+
+## Live Version
+(*no longer functioning*)
+
 A live version of this application can be launched with binder:
 
 [![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/bruxerjk/gl-ice-cover-app/main?urlpath=%2Fproxy%2F5006%2Fbokeh-app)

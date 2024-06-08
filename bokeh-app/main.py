@@ -445,14 +445,13 @@ def build_layout():
         
         start_year = int(df.columns[0])
         end_year = int(df.columns[-1])
-
-        #df['date'] = pd.to_datetime(df.index, format='%j').strftime('%m-%d')
         
+        # add dummy date column for plotting
         start_date = datetime(1901,11,1)
         date_list = [(start_date+timedelta(days=x)).strftime('%m-%d') for x in range(len(df))]
 
         df['date'] = date_list
-        #print(df.tail())
+        
         fig, lines = plot_all(fig, df, start_year, end_year)
 
         fig, selected_2, label_2, hover_2 = plot_selected(fig, df, end_year-1, SELECTED_COLOUR_2)
