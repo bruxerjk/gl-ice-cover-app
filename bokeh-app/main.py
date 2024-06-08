@@ -55,13 +55,12 @@ def get_current_yr_data(current_yr):
     # fetch and read current year's data
     last_yr = current_yr - 1
 
-    url = f'https://coastwatch.glerl.noaa.gov/statistic/ice/dat/g{last_yr}_{current_yr}_ice.dat'
-
-    # convert names to same as historical data
+    #url = f'https://coastwatch.glerl.noaa.gov/statistic/ice/dat/g{last_yr}_{current_yr}_ice.dat'
+    url = f'https://apps.glerl.noaa.gov/coastwatch/webdata/statistic/ice/dat/g{last_yr}_{current_yr}_ice.dat'
+        # convert names to same as historical data
     names=['year','day','sup','mic','hur','eri','ont','stc','bas']
-    current_df = pd.read_csv(url, sep='\s+', skiprows=7, header=0, names=names)
-
-    # for the current year's data, the dates are already in julian days
+    current_df = pd.read_csv(url, sep='\s+', skiprows=6, header=0, names=names)
+        # for the current year's data, the dates are already in julian days
     julian = current_df['day'].iloc[0]
 
     # for plotting purposes, we set Nov 1 to season_day 1
@@ -69,7 +68,7 @@ def get_current_yr_data(current_yr):
     days = list(range(offset, offset+len(current_df)))
     current_df['season_day'] = days
     current_df.set_index('season_day', inplace=True)
-
+    
     return current_df
 
 
@@ -105,7 +104,8 @@ def get_historical_data(lake):
     """
 
     # fetch and read historical data through last year
-    url = f'''https://www.glerl.noaa.gov/data/ice/daily/{lake}.txt'''
+    #url = f'''https://www.glerl.noaa.gov/data/ice/daily/{lake}.txt'''
+    url = f'''https://www.glerl.noaa.gov/data/ice/glicd/daily/{lake}.txt'''
 
     # index is the date column to start
     hist_df = pd.read_csv(url, sep='\s+', index_col=[0])
@@ -126,12 +126,13 @@ def get_historical_data(lake):
     hist_df.reset_index(inplace=True)
 
     first_date = hist_df['index'].iloc[0]  # first date in table
+    
     first_date = datetime.strptime(first_date, '%b-%d')
     julian = int(first_date.strftime('%j'))
-
+    
     # drop date index
     hist_df.drop('index', axis=1, inplace=True)
-
+    
     # for plotting purposes, we'll set Nov 1 to season_day 1
     offset = julian-SEASON_DAYS_1
     days = list(range(offset, offset+len(hist_df)))
@@ -175,13 +176,24 @@ def combine_data(lake, current_yr, current_df, hist_df):
 
     # concat with current df
     df = pd.concat([df, current_df[lake]], axis=1)
-
+    
+    
+    # *** ADDED 2024-06-08
+    # *** If statement checks for duplicate columns for current year
+    # *** Possible that historical data now also includes current year
+    # *** However, unable to check since in June (post-winter season)
+    # *** Check in winter season to confirm
+    if str(current_yr) in df:
+        
+        df.drop(str(current_yr), axis=1, inplace=True)
+    
     # rename column from current dataframe to current year
     df.rename({lake : str(current_yr)}, axis=1, inplace=True)
+    #df.drop_duplicates(keep='last', inplace=True)
 
     # give index a name
     df.index.rename('season_day', inplace=True)
-
+        
     return df
 
 
@@ -353,7 +365,6 @@ def plot_selected(fig, df, year, selected_colour):
         Label with year text.
 
     """
-
     selected_kwargs = dict(line_color = selected_colour,
                            line_width = 4)
 
@@ -377,7 +388,7 @@ def plot_selected(fig, df, year, selected_colour):
     # find location of peak value for labelling
     labelx = df[str(year)].idxmax(axis=0) # index of max ice
     labely = df.loc[:, str(year)].max() # max ice
-
+    
     # add label for selected year, locate at peak
     label = Label(x=labelx, y=labely, x_units='data',
                         text=f'{year}', render_mode='css',
@@ -429,17 +440,19 @@ def build_layout():
 
         # create an empty plot
         fig = create_baseplot(lake)
-
+        
         df = lakes[lake]['data']
-
+        
         start_year = int(df.columns[0])
         end_year = int(df.columns[-1])
 
-        df['date'] = pd.to_datetime(df.index, format='%j').strftime('%m-%d')
+        #df['date'] = pd.to_datetime(df.index, format='%j').strftime('%m-%d')
+        
         start_date = datetime(1901,11,1)
         date_list = [(start_date+timedelta(days=x)).strftime('%m-%d') for x in range(len(df))]
-        df['date'] = date_list
 
+        df['date'] = date_list
+        #print(df.tail())
         fig, lines = plot_all(fig, df, start_year, end_year)
 
         fig, selected_2, label_2, hover_2 = plot_selected(fig, df, end_year-1, SELECTED_COLOUR_2)
